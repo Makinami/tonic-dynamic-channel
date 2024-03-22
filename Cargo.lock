@@ -122,6 +122,7 @@ version = "0.1.0"
 dependencies = [
  "dns-lookup",
  "http",
+ "once_cell",
  "tokio",
  "tonic",
  "tower",

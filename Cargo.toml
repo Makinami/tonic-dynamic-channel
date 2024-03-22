@@ -16,3 +16,6 @@ http = "0.2"
 [features]
 default = ["tls"]
 tls = ["tonic/tls"]
+
+[dev-dependencies]
+once_cell = "1.19"

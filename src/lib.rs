@@ -1,8 +1,8 @@
 mod endpoint_builder;
-use dns::resolve_domain;
 pub use endpoint_builder::EndpointBuilder;
 
 mod dns;
+use dns::resolve_domain;
 
 use std::{collections::HashSet, net::IpAddr};
 
@@ -55,9 +55,7 @@ impl AutoBalancedChannel {
                 }
 
                 for old_ip in old_endpoints.difference(&new_endpoints) {
-                    let _ = sender
-                        .send(Change::Remove(*old_ip))
-                        .await;
+                    let _ = sender.send(Change::Remove(*old_ip)).await;
                 }
 
                 old_endpoints = new_endpoints;

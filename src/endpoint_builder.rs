@@ -32,7 +32,7 @@ impl EndpointBuilder {
         // Check if URL contains hostname that can be resolved with DNS
         match url.host() {
             Some(host) => match host {
-                Host::Domain(_) => {},
+                Host::Domain(_) => {}
                 Host::Ipv4(_) => todo!(),
                 Host::Ipv6(_) => todo!(),
             },
