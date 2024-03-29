@@ -4,7 +4,7 @@ pub use endpoint_template::EndpointTemplate;
 mod dns;
 use dns::resolve_domain;
 
-use std::{collections::HashSet, net::IpAddr};
+use std::{collections::HashSet, net::IpAddr, time::Duration};
 
 use tokio::task::JoinHandle;
 use tonic::transport::Channel;
@@ -16,7 +16,14 @@ pub struct AutoBalancedChannel {
 }
 
 impl AutoBalancedChannel {
-    pub fn from_endpoint(endpoint_template: EndpointTemplate) -> AutoBalancedChannel {
+    const DEFAULT_INTERVAL: Duration = Duration::from_secs(15);
+
+    pub fn new(endpoint_template: EndpointTemplate) -> Self {
+        Self::with_interval(endpoint_template, Self::DEFAULT_INTERVAL)
+    }
+
+    pub fn with_interval(endpoint_template: EndpointTemplate, interval: Duration) -> AutoBalancedChannel {
+        let (channel, sender) = Channel::balance_channel::<IpAddr>(1024);
 
         let background_task = tokio::spawn(async move {
             let add_endpoint = |ip_address: IpAddr| {
@@ -44,6 +51,7 @@ impl AutoBalancedChannel {
             };
 
             let mut old_endpoints: HashSet<IpAddr> = HashSet::new();
+            let mut interval = tokio::time::interval(interval);
             loop {
                 let new_endpoints = resolve_domain(domain)
                     .expect("dns resolution failed")
@@ -58,6 +66,8 @@ impl AutoBalancedChannel {
                 }
 
                 old_endpoints = new_endpoints;
+
+                interval.tick().await;
             }
         });
 
