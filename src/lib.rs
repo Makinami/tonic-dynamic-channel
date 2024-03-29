@@ -16,10 +16,11 @@ pub struct AutoBalancedChannel {
     status_reader: Receiver<Status>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Status {
     Ok,
     DnsResolutionError { details: String },
+    NoEndpoints,
     Stopped,
 }
 
@@ -67,6 +68,11 @@ impl AutoBalancedChannel {
             let mut old_endpoints: HashSet<IpAddr> = HashSet::new();
             let mut interval = tokio::time::interval(interval);
             loop {
+                if sender.is_closed() {
+                    let _ = status_setter.send(Status::Stopped);
+                    return;
+                }
+
                 let new_endpoints = match resolve_domain(domain) {
                     Ok(ip_addrs) => {
                         let _ = status_setter.send(Status::Ok);
@@ -104,6 +110,10 @@ impl AutoBalancedChannel {
 
                 old_endpoints = new_endpoints;
 
+                if old_endpoints.is_empty() {
+                    let _ = status_setter.send(Status::NoEndpoints);
+                }
+
                 interval.tick().await;
             }
         });
@@ -115,8 +125,8 @@ impl AutoBalancedChannel {
         }
     }
 
-    pub fn channel(&self) -> &Channel {
-        &self.channel
+    pub fn channel(&self) -> Channel {
+        self.channel.clone()
     }
 
     pub fn get_status(&self) -> Status {
