@@ -45,3 +45,27 @@ pub mod mock_net {
             .expect("failed to acquire write lock on DNS_RESULT") = func;
     }
 }
+
+#[test]
+fn can_mock_address_resolution() {
+    use std::{net::SocketAddr, str::FromStr};
+
+    let addresses = vec![
+        IpAddr::from_str("128.0.0.1").unwrap(),
+        IpAddr::from_str("129.0.0.1").unwrap(),
+        IpAddr::from_str("::2").unwrap(),
+        IpAddr::from_str("::3").unwrap(),
+    ];
+
+    {
+        let sockets = addresses.iter().map(|ip| SocketAddr::new(*ip, 0)).collect::<Vec<_>>();
+        mock_net::set_socket_addrs(Box::new(move |_, _| {
+            Ok(sockets.clone())
+        }));
+    }
+
+    assert_eq!(
+        resolve_domain("localhost").unwrap().collect::<Vec<_>>(),
+        addresses
+    );
+}
