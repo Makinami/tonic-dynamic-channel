@@ -1,5 +1,5 @@
-mod endpoint_builder;
-pub use endpoint_builder::EndpointBuilder;
+mod endpoint_template;
+pub use endpoint_template::EndpointTemplate;
 
 mod dns;
 use dns::resolve_domain;
@@ -16,19 +16,18 @@ pub struct AutoBalancedChannel {
 }
 
 impl AutoBalancedChannel {
-    pub fn from_endpoint(endpoint_builder: EndpointBuilder) -> AutoBalancedChannel {
-        let (channel, sender) = Channel::balance_channel::<IpAddr>(1);
+    pub fn from_endpoint(endpoint_template: EndpointTemplate) -> AutoBalancedChannel {
 
         let background_task = tokio::spawn(async move {
             let add_endpoint = |ip_address: IpAddr| {
-                let new_endpoint = endpoint_builder.build(ip_address);
+                let new_endpoint = endpoint_template.build(ip_address);
                 // todo: what to do with errors?
                 sender.send(Change::Insert(ip_address, new_endpoint))
             };
 
             // We make sure that the URL contains a host when creating a
             // builder.
-            let domain = match endpoint_builder.url().host().unwrap() {
+            let domain = match endpoint_template.url().host().unwrap() {
                 url::Host::Domain(domain) => domain,
                 // If provided URL already points to an IP address, there is
                 // nothing to resolve. On top of that, there will never be more

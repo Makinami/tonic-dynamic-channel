@@ -3,7 +3,7 @@ use std::{net::IpAddr, str::FromStr, time::Duration};
 use tonic::transport::{ClientTlsConfig, Endpoint, Uri};
 use url::{Host, Url};
 
-pub struct EndpointBuilder {
+pub struct EndpointTemplate {
     url: Url,
     origin: Option<Uri>,
     user_agent: Option<HeaderValue>,
@@ -25,7 +25,7 @@ pub struct EndpointBuilder {
     // executor: dyn Executor<Pin<Box<dyn Future<Output = ()> + Send>>> + Send + Sync + 'static,
 }
 
-impl EndpointBuilder {
+impl EndpointTemplate {
     pub fn new(url: impl Into<Url>) -> Result<Self, ()> {
         let url: Url = url.into();
 
@@ -266,10 +266,10 @@ impl EndpointBuilder {
     }
 
     fn build_uri(&self, ip_addr: IpAddr) -> Uri {
-        // We make sure this conversion doesn't return any errors in new already
-        // so unwrap is safe here.
+        // We make sure this conversion doesn't return any errors in Self::new
+        // already so it's safe to unwrap here.
         let mut url = self.url.clone();
-        url.set_ip_host(ip_addr.into()).unwrap();
+        url.set_ip_host(ip_addr).unwrap();
         Uri::from_str(url.as_str()).unwrap()
     }
 }
@@ -281,11 +281,13 @@ mod tests {
     use http::Uri;
     use url::Url;
 
-    use crate::EndpointBuilder;
+    use crate::EndpointTemplate
+;
 
     #[test]
     fn can_substitute_domain_fot_ipv4_address() {
-        let builder = EndpointBuilder::new(Url::parse("http://example.com:50051/foo").unwrap()).unwrap();
+        let builder = EndpointTemplate
+    ::new(Url::parse("http://example.com:50051/foo").unwrap()).unwrap();
 
         let endpoint = builder.build("203.0.113.6".parse::<IpAddr>().unwrap());
         assert_eq!(
@@ -296,7 +298,8 @@ mod tests {
 
     #[test]
     fn can_substitute_domain_fot_ipv6_address() {
-        let builder = EndpointBuilder::new(Url::parse("http://example.com:50051/foo").unwrap()).unwrap();
+        let builder = EndpointTemplate
+    ::new(Url::parse("http://example.com:50051/foo").unwrap()).unwrap();
 
         let endpoint = builder.build("2001:db8::".parse::<IpAddr>().unwrap());
         assert_eq!(
