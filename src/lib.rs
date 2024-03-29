@@ -1,12 +1,19 @@
 mod endpoint_template;
 pub use endpoint_template::EndpointTemplate;
 
-mod dns;
+//#[cfg(not(any(test, feature = "mock_dns")))]
+//mod dns;
+//#[cfg(any(test, feature = "mock_dns"))]
+pub mod dns;
+
 use dns::resolve_domain;
 
 use std::{collections::HashSet, net::IpAddr, time::Duration};
 
-use tokio::{sync::watch::{self, Receiver}, task::JoinHandle};
+use tokio::{
+    sync::watch::{self, Receiver},
+    task::JoinHandle,
+};
 use tonic::transport::Channel;
 use tower::discover::Change;
 
@@ -26,7 +33,9 @@ pub enum Status {
 
 impl Status {
     fn dns_resolution_error(e: impl std::fmt::Debug) -> Self {
-        Self::DnsResolutionError { details: format!("{e:?}") }
+        Self::DnsResolutionError {
+            details: format!("{e:?}"),
+        }
     }
 }
 
@@ -37,7 +46,10 @@ impl AutoBalancedChannel {
         Self::with_interval(endpoint_template, Self::DEFAULT_INTERVAL)
     }
 
-    pub fn with_interval(endpoint_template: EndpointTemplate, interval: Duration) -> AutoBalancedChannel {
+    pub fn with_interval(
+        endpoint_template: EndpointTemplate,
+        interval: Duration,
+    ) -> AutoBalancedChannel {
         let (channel, sender) = Channel::balance_channel::<IpAddr>(1024);
         let (status_setter, status_reader) = watch::channel::<Status>(Status::Ok);
 
@@ -77,7 +89,7 @@ impl AutoBalancedChannel {
                     Ok(ip_addrs) => {
                         let _ = status_setter.send(Status::Ok);
                         ip_addrs.collect()
-                    },
+                    }
                     Err(e) => {
                         // DNS resolution errors might be recoverable and
                         // usually do not immediately spell doom for the
@@ -85,7 +97,7 @@ impl AutoBalancedChannel {
                         // problem and use last known IP addresses.
                         let _ = status_setter.send(Status::dns_resolution_error(e));
                         old_endpoints.clone()
-                    },
+                    }
                 };
 
                 for new_ip in new_endpoints.difference(&old_endpoints) {

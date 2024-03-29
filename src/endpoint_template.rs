@@ -281,13 +281,12 @@ mod tests {
     use http::Uri;
     use url::Url;
 
-    use crate::EndpointTemplate
-;
+    use crate::EndpointTemplate;
 
     #[test]
     fn can_substitute_domain_fot_ipv4_address() {
-        let builder = EndpointTemplate
-    ::new(Url::parse("http://example.com:50051/foo").unwrap()).unwrap();
+        let builder =
+            EndpointTemplate::new(Url::parse("http://example.com:50051/foo").unwrap()).unwrap();
 
         let endpoint = builder.build("203.0.113.6".parse::<IpAddr>().unwrap());
         assert_eq!(
@@ -298,8 +297,8 @@ mod tests {
 
     #[test]
     fn can_substitute_domain_fot_ipv6_address() {
-        let builder = EndpointTemplate
-    ::new(Url::parse("http://example.com:50051/foo").unwrap()).unwrap();
+        let builder =
+            EndpointTemplate::new(Url::parse("http://example.com:50051/foo").unwrap()).unwrap();
 
         let endpoint = builder.build("2001:db8::".parse::<IpAddr>().unwrap());
         assert_eq!(

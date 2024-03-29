@@ -1,25 +1,26 @@
 use std::{io::Result, net::IpAddr};
 
-#[cfg(not(test))]
-use std::net::ToSocketAddrs;
+//#[cfg(not(test))]
+//use std::net::ToSocketAddrs;
 
-#[cfg(test)]
+//#[cfg(test)]
 use mock_net::ToSocketAddrs;
 
 pub fn resolve_domain(domain: &str) -> Result<impl Iterator<Item = IpAddr>> {
     Ok((domain, 0).to_socket_addrs()?.map(|addr| addr.ip()))
 }
 
-#[cfg(test)]
+//#[cfg(test)]
 pub mod mock_net {
     use std::{io, net::SocketAddr, vec};
 
     use once_cell::sync::Lazy;
     use std::sync::RwLock;
 
-    static DNS_RESULT: Lazy<
-        RwLock<Box<dyn Fn(&str, u16) -> io::Result<Vec<SocketAddr>> + Send + Sync>>,
-    > = Lazy::new(|| RwLock::new(Box::new(|_, _| Ok(vec![]))));
+    type ToSocketAddrsFn = dyn Fn(&str, u16) -> io::Result<Vec<SocketAddr>> + Send + Sync;
+
+    static DNS_RESULT: Lazy<RwLock<Box<ToSocketAddrsFn>>> =
+        Lazy::new(|| RwLock::new(Box::new(|_, _| Ok(vec![]))));
 
     pub trait ToSocketAddrs {
         type Iter: Iterator<Item = SocketAddr>;
@@ -37,9 +38,7 @@ pub mod mock_net {
         }
     }
 
-    pub fn set_socket_addrs(
-        func: Box<dyn Fn(&str, u16) -> io::Result<Vec<SocketAddr>> + Send + Sync>,
-    ) {
+    pub fn set_socket_addrs(func: Box<ToSocketAddrsFn>) {
         *DNS_RESULT
             .write()
             .expect("failed to acquire write lock on DNS_RESULT") = func;
@@ -58,10 +57,11 @@ fn can_mock_address_resolution() {
     ];
 
     {
-        let sockets = addresses.iter().map(|ip| SocketAddr::new(*ip, 0)).collect::<Vec<_>>();
-        mock_net::set_socket_addrs(Box::new(move |_, _| {
-            Ok(sockets.clone())
-        }));
+        let sockets = addresses
+            .iter()
+            .map(|ip| SocketAddr::new(*ip, 0))
+            .collect::<Vec<_>>();
+        mock_net::set_socket_addrs(Box::new(move |_, _| Ok(sockets.clone())));
     }
 
     assert_eq!(

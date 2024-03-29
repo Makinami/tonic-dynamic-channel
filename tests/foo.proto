@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package foo;
+
+// The greeting service definition.
+service Foo {
+  // Sends a greeting
+  rpc GetServer (Empty) returns (ServerResponse) {}
+}
+
+message Empty {}
+
+message ServerResponse {
+  string message = 1;
+}
