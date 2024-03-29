@@ -6,13 +6,27 @@ use dns::resolve_domain;
 
 use std::{collections::HashSet, net::IpAddr, time::Duration};
 
-use tokio::task::JoinHandle;
+use tokio::{sync::watch::{self, Receiver}, task::JoinHandle};
 use tonic::transport::Channel;
 use tower::discover::Change;
 
 pub struct AutoBalancedChannel {
     channel: Channel,
     background_task: JoinHandle<()>,
+    status_reader: Receiver<Status>,
+}
+
+#[derive(Clone, Debug)]
+pub enum Status {
+    Ok,
+    DnsResolutionError { details: String },
+    Stopped,
+}
+
+impl Status {
+    fn dns_resolution_error(e: impl std::fmt::Debug) -> Self {
+        Self::DnsResolutionError { details: format!("{e:?}") }
+    }
 }
 
 impl AutoBalancedChannel {
@@ -24,11 +38,11 @@ impl AutoBalancedChannel {
 
     pub fn with_interval(endpoint_template: EndpointTemplate, interval: Duration) -> AutoBalancedChannel {
         let (channel, sender) = Channel::balance_channel::<IpAddr>(1024);
+        let (status_setter, status_reader) = watch::channel::<Status>(Status::Ok);
 
         let background_task = tokio::spawn(async move {
             let add_endpoint = |ip_address: IpAddr| {
                 let new_endpoint = endpoint_template.build(ip_address);
-                // todo: what to do with errors?
                 sender.send(Change::Insert(ip_address, new_endpoint))
             };
 
@@ -53,16 +67,39 @@ impl AutoBalancedChannel {
             let mut old_endpoints: HashSet<IpAddr> = HashSet::new();
             let mut interval = tokio::time::interval(interval);
             loop {
-                let new_endpoints = resolve_domain(domain)
-                    .expect("dns resolution failed")
-                    .collect::<HashSet<IpAddr>>();
+                let new_endpoints = match resolve_domain(domain) {
+                    Ok(ip_addrs) => {
+                        let _ = status_setter.send(Status::Ok);
+                        ip_addrs.collect()
+                    },
+                    Err(e) => {
+                        // DNS resolution errors might be recoverable and
+                        // usually do not immediately spell doom for the
+                        // channel. Because of this, we just report the interim
+                        // problem and use last known IP addresses.
+                        let _ = status_setter.send(Status::dns_resolution_error(e));
+                        old_endpoints.clone()
+                    },
+                };
 
                 for new_ip in new_endpoints.difference(&old_endpoints) {
-                    let _ = add_endpoint(*new_ip).await;
+                    if add_endpoint(*new_ip).await.is_err() {
+                        // Receiver is closed which happens when crated Channel
+                        // was dropped. There is nothing more to do, so we just
+                        // report the status and quit.
+                        let _ = status_setter.send(Status::Stopped);
+                        return;
+                    }
                 }
 
                 for old_ip in old_endpoints.difference(&new_endpoints) {
-                    let _ = sender.send(Change::Remove(*old_ip)).await;
+                    if sender.send(Change::Remove(*old_ip)).await.is_err() {
+                        // Receiver is closed which happens when crated Channel
+                        // was dropped. There is nothing more to do, so we just
+                        // report the status and quit.
+                        let _ = status_setter.send(Status::Stopped);
+                        return;
+                    }
                 }
 
                 old_endpoints = new_endpoints;
@@ -74,11 +111,16 @@ impl AutoBalancedChannel {
         Self {
             channel,
             background_task,
+            status_reader,
         }
     }
 
     pub fn channel(&self) -> &Channel {
         &self.channel
+    }
+
+    pub fn get_status(&self) -> Status {
+        self.status_reader.borrow().to_owned()
     }
 }
 
