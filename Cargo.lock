@@ -132,21 +132,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "balancer"
-version = "0.1.0"
-dependencies = [
- "dns-lookup",
- "http",
- "once_cell",
- "prost",
- "tokio",
- "tonic",
- "tonic-build",
- "tower",
- "url",
-]
-
-[[package]]
 name = "base64"
 version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1039,6 +1024,21 @@ dependencies = [
  "prost-build",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tonic-dynamic-channel"
+version = "0.1.0"
+dependencies = [
+ "dns-lookup",
+ "http",
+ "once_cell",
+ "prost",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "tower",
+ "url",
 ]
 
 [[package]]

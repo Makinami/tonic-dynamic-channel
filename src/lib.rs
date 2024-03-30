@@ -1,10 +1,9 @@
 mod endpoint_template;
 pub use endpoint_template::EndpointTemplate;
 
-//#[cfg(not(any(test, feature = "mock_dns")))]
-//mod dns;
-//#[cfg(any(test, feature = "mock_dns"))]
-pub mod dns;
+mod dns;
+#[cfg(feature = "mock-dns")]
+pub use dns::mock_net;
 
 use dns::resolve_domain;
 

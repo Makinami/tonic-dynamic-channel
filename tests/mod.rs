@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use balancer::{AutoBalancedChannel, EndpointTemplate, Status};
+use tonic_dynamic_channel::{AutoBalancedChannel, EndpointTemplate, Status};
 use tokio::task::JoinSet;
 use tonic::{transport::Server, Request, Response};
 
@@ -55,7 +55,7 @@ fn set_dns(addresses: &[&str]) {
         .map(|address| std::net::IpAddr::from_str(address).unwrap())
         .map(|ip| std::net::SocketAddr::new(ip, 0))
         .collect::<Vec<_>>();
-    balancer::dns::mock_net::set_socket_addrs(Box::new(move |_, _| Ok(sockets.clone())));
+    tonic_dynamic_channel::mock_net::set_socket_addrs(Box::new(move |_, _| Ok(sockets.clone())));
 }
 
 #[tokio::test]
@@ -80,7 +80,7 @@ async fn qwerty() {
         set.spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(10));
             loop {
-                if balanced.get_status() == balancer::Status::Ok {
+                if balanced.get_status() == Status::Ok {
                     let response = client
                         .clone()
                         .get_server(tonic::Request::new(Empty {}))
@@ -169,7 +169,7 @@ async fn qwerty() {
 
     {
         println!("test dns error");
-        balancer::dns::mock_net::set_socket_addrs(Box::new(move |_, _| {
+        tonic_dynamic_channel::mock_net::set_socket_addrs(Box::new(move |_, _| {
             #[derive(Debug)]
             struct Error {}
             impl std::fmt::Display for Error {
