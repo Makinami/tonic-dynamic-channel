@@ -3,6 +3,7 @@ use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use sequential_test::sequential;
 use tonic_dynamic_channel::{AutoBalancedChannel, EndpointTemplate, Status};
 use tokio::task::JoinSet;
 use tonic::{transport::Server, Request, Response};
@@ -58,8 +59,7 @@ fn set_dns(addresses: &[&str]) {
     tonic_dynamic_channel::mock_net::set_socket_addrs(Box::new(move |_, _| Ok(sockets.clone())));
 }
 
-#[tokio::test]
-async fn qwerty() {
+fn setup() -> (JoinSet<Result<(), tonic::transport::Error>>, std::sync::Arc<AutoBalancedChannel>, std::sync::Arc<std::sync::RwLock<HashMap<String, i32>>>) {
     let mut set = JoinSet::new();
 
     set.spawn(async { MyServer::run("[::1]").await });
@@ -70,12 +70,12 @@ async fn qwerty() {
             .expect("endpoint template"),
         Duration::from_millis(1),
     ));
-    let client = FooClient::new(balanced.channel());
 
     let responses: Arc<RwLock<HashMap<String, i32>>> = Arc::new(RwLock::new(HashMap::new()));
 
     {
         let balanced = balanced.clone();
+        let client = FooClient::new(balanced.channel());
         let responses = responses.clone();
         set.spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(10));
@@ -99,18 +99,29 @@ async fn qwerty() {
         });
     }
 
-    {
-        println!("test no endpoints");
-        set_dns(&[]);
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        assert_eq!(balanced.get_status(), Status::NoEndpoints);
-    }
+    (set, balanced, responses)
+}
 
-    {
-        println!("test balancing");
-        set_dns(&["127.0.0.1", "::1"]);
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        let mut responses = responses.write().expect("can't get a write lock");
+#[tokio::test]
+#[sequential]
+async fn test_no_endpoints() {
+    let (_set, balanced, _responses) = setup();
+
+    set_dns(&[]);
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    assert_eq!(balanced.get_status(), Status::NoEndpoints);
+}
+
+#[tokio::test]
+#[sequential]
+async fn test_balancing() {
+    let (_set, _balanced, responses) = setup();
+
+    set_dns(&["127.0.0.1", "::1"]);
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    responses.write().expect("can't get a write lock").clear();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    responses.write().and_then(|responses| {
         assert!(
             responses
                 .get("127.0.0.1")
@@ -125,15 +136,21 @@ async fn qwerty() {
                 >= &40,
             "strangely few responses from [::1] server"
         );
-        responses.clear();
-    }
+        Ok(())
+    }).expect("can't get a write lock");
+}
 
-    println!("test switching");
-    {
-        println!("only IPv4");
-        set_dns(&["127.0.0.1"]);
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        let mut responses = responses.write().expect("can't get a write lock");
+#[tokio::test]
+#[sequential]
+async fn test_switching() {
+    let (_set, _balanced, responses) = setup();
+
+    println!("only IPv4");
+    set_dns(&["127.0.0.1"]);
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    responses.write().expect("can't get a write lock").clear();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    responses.read().and_then(|responses| {
         assert!(
             responses
                 .get("127.0.0.1")
@@ -145,14 +162,15 @@ async fn qwerty() {
             responses.get("[::1]").is_none(),
             "a response from [::1] was received"
         );
-        responses.clear();
-    }
+        Ok(())
+    }).expect("can't get a read lock");
 
-    {
-        println!("only IPv6");
-        set_dns(&["::1"]);
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        let mut responses = responses.write().expect("can't get a write lock");
+    println!("only IPv6");
+    set_dns(&["::1"]);
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    responses.write().expect("can't get a write lock").clear();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    responses.read().and_then(|responses| {
         assert!(
             responses.get("127.0.0.1").is_none(),
             "a response from 127.0.0.1 was received"
@@ -164,28 +182,31 @@ async fn qwerty() {
                 >= &90,
             "strangely few responses from [::1] server"
         );
-        responses.clear();
-    }
+        Ok(())
+    }).expect("can't get a write lock");
+}
 
-    {
-        println!("test dns error");
-        tonic_dynamic_channel::mock_net::set_socket_addrs(Box::new(move |_, _| {
-            #[derive(Debug)]
-            struct Error {}
-            impl std::fmt::Display for Error {
-                fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                    write!(f, "Error")
-                }
+#[tokio::test]
+#[sequential]
+async fn test_dns_error() {
+    let (_set, balanced, _responses) = setup();
+
+    set_dns(&["127.0.0.1", "::1"]);
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    tonic_dynamic_channel::mock_net::set_socket_addrs(Box::new(move |_, _| {
+        #[derive(Debug)]
+        struct Error {}
+        impl std::fmt::Display for Error {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "Error")
             }
-            impl std::error::Error for Error {}
-            Err(std::io::Error::new(std::io::ErrorKind::Other, Error {}))
-        }));
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        match balanced.get_status() {
-            Status::DnsResolutionError { .. } => assert!(true),
-            _ => assert!(false, "status is not DnsResolutionError"),
         }
+        impl std::error::Error for Error {}
+        Err(std::io::Error::new(std::io::ErrorKind::Other, Error {}))
+    }));
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    match balanced.get_status() {
+        Status::DnsResolutionError { .. } => assert!(true),
+        _ => assert!(false, "status is not DnsResolutionError"),
     }
-
-    set.abort_all();
 }
