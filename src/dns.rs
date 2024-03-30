@@ -1,16 +1,16 @@
 use std::{io::Result, net::IpAddr};
 
-//#[cfg(not(test))]
-//use std::net::ToSocketAddrs;
+#[cfg(not(any(test, feature = "mock-dns")))]
+use std::net::ToSocketAddrs;
 
-//#[cfg(test)]
+#[cfg(any(test, feature = "mock-dns"))]
 use mock_net::ToSocketAddrs;
 
 pub fn resolve_domain(domain: &str) -> Result<impl Iterator<Item = IpAddr>> {
     Ok((domain, 0).to_socket_addrs()?.map(|addr| addr.ip()))
 }
 
-//#[cfg(test)]
+#[cfg(any(test, feature = "mock-dns"))]
 pub mod mock_net {
     use std::{io, net::SocketAddr, vec};
 
@@ -22,7 +22,7 @@ pub mod mock_net {
     static DNS_RESULT: Lazy<RwLock<Box<ToSocketAddrsFn>>> =
         Lazy::new(|| RwLock::new(Box::new(|_, _| Ok(vec![]))));
 
-    pub trait ToSocketAddrs {
+    pub(super) trait ToSocketAddrs {
         type Iter: Iterator<Item = SocketAddr>;
 
         fn to_socket_addrs(&self) -> io::Result<Self::Iter>;
