@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use sequential_test::sequential;
-use tonic_dynamic_channel::{AutoBalancedChannel, EndpointTemplate, Status};
+use tonic_dynamic_channel::{AutoBalancedChannel, EndpointTemplate, Status, Health};
 use tokio::task::JoinSet;
 use tonic::{transport::Server, Request, Response};
 
@@ -109,7 +109,7 @@ async fn test_no_endpoints() {
 
     set_dns(&[]);
     tokio::time::sleep(Duration::from_millis(10)).await;
-    assert_eq!(balanced.get_status(), Status::NoEndpoints);
+    assert_eq!(balanced.get_health(), Health::Broken);
 }
 
 #[tokio::test]

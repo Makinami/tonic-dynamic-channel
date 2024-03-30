@@ -15,14 +15,13 @@ pub struct AutoBalancedChannel {
     channel: Channel,
     background_task: JoinHandle<()>,
     status_reader: Receiver<Status>,
+    endpoints_count_reader: Receiver<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Status {
     Ok,
     DnsResolutionError { details: String },
-    NoEndpoints,
-    Stopped,
 }
 
 impl Status {
@@ -31,6 +30,25 @@ impl Status {
             details: format!("{e:?}"),
         }
     }
+
+    fn is_dns_resolution_error(&self) -> bool {
+        match &self {
+            Status::DnsResolutionError { .. } => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Health {
+    /// There is at least one successfully detected and available endpoint
+    Ok,
+    /// Latest DNS resolution has failed, but there are still previously
+    /// registered endpoints, so making gRPC calls could succeed.
+    Undetermined,
+    /// There are no endpoints available. Calling gRPC method will block until
+    /// one is detected.
+    Broken,
 }
 
 impl AutoBalancedChannel {
@@ -46,6 +64,7 @@ impl AutoBalancedChannel {
     ) -> AutoBalancedChannel {
         let (channel, sender) = Channel::balance_channel::<IpAddr>(16);
         let (status_setter, status_reader) = watch::channel::<Status>(Status::Ok);
+        let (endpoints_count_setter, endpoints_count_reader) = watch::channel::<usize>(0);
 
         let background_task = tokio::spawn(async move {
             let add_endpoint = |ip_address: IpAddr| {
@@ -75,14 +94,25 @@ impl AutoBalancedChannel {
             let mut interval = tokio::time::interval(interval);
             loop {
                 if sender.is_closed() {
-                    let _ = status_setter.send(Status::Stopped);
                     return;
                 }
 
-                let new_endpoints = match resolve_domain(domain) {
+                match resolve_domain(domain) {
                     Ok(ip_addrs) => {
                         let _ = status_setter.send(Status::Ok);
-                        ip_addrs.collect()
+                        let new_endpoints: HashSet<IpAddr> = ip_addrs.collect();
+
+                        for new_ip in new_endpoints.difference(&old_endpoints) {
+                            let _ = add_endpoint(*new_ip).await;
+                        }
+
+                        for old_ip in old_endpoints.difference(&new_endpoints) {
+                            let _ =  sender.send(Change::Remove(*old_ip)).await;
+                        }
+
+                        old_endpoints = new_endpoints;
+
+                        let _ = endpoints_count_setter.send(old_endpoints.len());
                     }
                     Err(e) => {
                         // DNS resolution errors might be recoverable and
@@ -90,35 +120,8 @@ impl AutoBalancedChannel {
                         // channel. Because of this, we just report the interim
                         // problem and use last known IP addresses.
                         let _ = status_setter.send(Status::dns_resolution_error(e));
-                        old_endpoints.clone()
                     }
                 };
-
-                for new_ip in new_endpoints.difference(&old_endpoints) {
-                    if add_endpoint(*new_ip).await.is_err() {
-                        // Receiver is closed which happens when crated Channel
-                        // was dropped. There is nothing more to do, so we just
-                        // report the status and quit.
-                        let _ = status_setter.send(Status::Stopped);
-                        return;
-                    }
-                }
-
-                for old_ip in old_endpoints.difference(&new_endpoints) {
-                    if sender.send(Change::Remove(*old_ip)).await.is_err() {
-                        // Receiver is closed which happens when crated Channel
-                        // was dropped. There is nothing more to do, so we just
-                        // report the status and quit.
-                        let _ = status_setter.send(Status::Stopped);
-                        return;
-                    }
-                }
-
-                old_endpoints = new_endpoints;
-
-                if old_endpoints.is_empty() {
-                    let _ = status_setter.send(Status::NoEndpoints);
-                }
 
                 interval.tick().await;
             }
@@ -128,6 +131,7 @@ impl AutoBalancedChannel {
             channel,
             background_task,
             status_reader,
+            endpoints_count_reader,
         }
     }
 
@@ -137,6 +141,16 @@ impl AutoBalancedChannel {
 
     pub fn get_status(&self) -> Status {
         self.status_reader.borrow().to_owned()
+    }
+
+    pub fn get_health(&self) -> Health {
+        if *self.endpoints_count_reader.borrow() == 0 {
+            Health::Broken
+        } else if self.status_reader.borrow().is_dns_resolution_error() {
+            Health::Undetermined
+        } else {
+            Health::Ok
+        }
     }
 }
 

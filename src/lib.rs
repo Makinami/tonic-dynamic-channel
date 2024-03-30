@@ -6,4 +6,4 @@ mod dns;
 pub use dns::mock_net;
 
 mod dynamic_channel;
-pub use dynamic_channel::{AutoBalancedChannel, Status};
+pub use dynamic_channel::{AutoBalancedChannel, Status, Health};
