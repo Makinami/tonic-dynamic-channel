@@ -1,8 +1,9 @@
 use http::HeaderValue;
 use std::{net::IpAddr, str::FromStr, time::Duration};
-use tonic::transport::{ClientTlsConfig, Endpoint, Uri};
+use tonic::transport::{Endpoint, Uri};
 use url::{Host, Url};
 
+#[derive(Debug)]
 pub struct EndpointTemplate {
     url: Url,
     origin: Option<Uri>,
@@ -10,8 +11,9 @@ pub struct EndpointTemplate {
     concurrency_limit: Option<usize>,
     rate_limit: Option<(u64, Duration)>,
     timeout: Option<Duration>,
-    #[cfg(feature = "tls")]
-    tls_config: Option<ClientTlsConfig>,
+    // Can't check this setter before calling build().
+    // Rarely used so let's ignore it for now.
+    // tls_config: Option<ClientTlsConfig>,
     buffer_size: Option<usize>,
     init_stream_window_size: Option<u32>,
     init_connection_window_size: Option<u32>,
@@ -22,31 +24,35 @@ pub struct EndpointTemplate {
     http2_keep_alive_while_idle: Option<bool>,
     connect_timeout: Option<Duration>,
     http2_adaptive_window: Option<bool>,
-    // executor: dyn Executor<Pin<Box<dyn Future<Output = ()> + Send>>> + Send + Sync + 'static,
 }
 
 impl EndpointTemplate {
-    pub fn new(url: impl Into<Url>) -> Result<Self, ()> {
+    pub fn new(url: impl Into<Url>) -> Result<Self, Error> {
         let url: Url = url.into();
 
         // Check if URL contains hostname that can be resolved with DNS
         match url.host() {
             Some(host) => match host {
                 Host::Domain(_) => {}
-                Host::Ipv4(_) => todo!(),
-                Host::Ipv6(_) => todo!(),
+                _ => return Err(Error::AlreadyIpAddress),
             },
-            None => todo!(),
+            None => return Err(Error::HostMissing),
         }
 
         // Check if hostname in URL can be substituted by IP address
         if url.cannot_be_a_base() {
-            todo!()
+            // Since we have a host, I can't imagine an address that still
+            // couldn't be a base. If there is one, let's treat it as
+            // Inconvertible error for simplicity.
+            return Err(Error::Inconvertible);
         }
 
-        // Check if tonic Uri can be build from Url
+        // Check if tonic Uri can be build from Url.
         if Uri::from_str(url.as_str()).is_err() {
-            todo!()
+            // It's hard to prove that any url::Url will also be parsable as
+            // tonic::transport::Uri, but in practice this error should never
+            // happen.
+            return Err(Error::Inconvertible)
         }
 
         Ok(Self {
@@ -56,8 +62,6 @@ impl EndpointTemplate {
             timeout: None,
             concurrency_limit: None,
             rate_limit: None,
-            #[cfg(feature = "tls")]
-            tls_config: None,
             buffer_size: None,
             init_stream_window_size: None,
             init_connection_window_size: None,
@@ -146,16 +150,6 @@ impl EndpointTemplate {
         }
     }
 
-    #[cfg(feature = "tls")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "tls")))]
-    pub fn tls_config(self, tls_config: ClientTlsConfig) -> Self {
-        //TODO: check conversion here
-        Self {
-            tls_config: Some(tls_config),
-            ..self
-        }
-    }
-
     pub fn tcp_nodelay(self, enabled: bool) -> Self {
         Self {
             tcp_nodelay: Some(enabled),
@@ -232,12 +226,6 @@ impl EndpointTemplate {
 
         endpoint = endpoint.buffer_size(self.buffer_size);
 
-        if let Some(tls_config) = self.tls_config.clone() {
-            // Building tls from tls_config already happens during builder
-            // creation so this will never return an error.
-            endpoint = endpoint.tls_config(tls_config).unwrap();
-        }
-
         if let Some(tcp_nodelay) = self.tcp_nodelay {
             endpoint = endpoint.tcp_nodelay(tcp_nodelay);
         }
@@ -261,8 +249,10 @@ impl EndpointTemplate {
         endpoint
     }
 
-    pub(crate) fn url(&self) -> &Url {
-        &self.url
+    pub(crate) fn domain(&self) -> &str {
+        // Unwrap is safe as we are making sure Url contains a domain in the
+        // constructor.
+        &self.url.domain().unwrap()
     }
 
     fn build_uri(&self, ip_addr: IpAddr) -> Uri {
@@ -274,6 +264,13 @@ impl EndpointTemplate {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum Error {
+    HostMissing,
+    AlreadyIpAddress,
+    Inconvertible,
+}
+
 #[cfg(test)]
 mod tests {
     use std::{net::IpAddr, str::FromStr};
@@ -282,6 +279,7 @@ mod tests {
     use url::Url;
 
     use crate::EndpointTemplate;
+    use super::Error;
 
     #[test]
     fn can_substitute_domain_fot_ipv4_address() {
@@ -305,5 +303,15 @@ mod tests {
             *endpoint.uri(),
             Uri::from_str("http://[2001:db8::]:50051/foo").unwrap()
         );
+    }
+
+    #[rstest::rstest]
+    #[case("http://127.0.0.1:50051", Error::AlreadyIpAddress)]
+    #[case("http://[::1]:50051", Error::AlreadyIpAddress)]
+    #[case("mailto:admin@example.com", Error::HostMissing)]
+    fn builder_error(#[case] input: &str, #[case] expected: Error) {
+        let result = EndpointTemplate::new(Url::parse(input).unwrap());
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), expected);
     }
 }
