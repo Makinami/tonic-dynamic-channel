@@ -13,7 +13,19 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install latest stable rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v1
+
+      - name: Check formatting
+        run: cargo fmt -- --check
 
       - name: Build
         run: cargo build --verbose
