@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use sequential_test::sequential;
-use tonic_dynamic_channel::{AutoBalancedChannel, EndpointTemplate, Status, Health};
+use tonic_dynamic_channel::{AutoBalancedChannel, EndpointTemplate, DnsStatus, Health};
 use tokio::task::JoinSet;
 use tonic::{transport::Server, Request, Response};
 
@@ -80,7 +80,7 @@ fn setup() -> (JoinSet<Result<(), tonic::transport::Error>>, std::sync::Arc<Auto
         set.spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(10));
             loop {
-                if balanced.get_status() == Status::Ok {
+                if balanced.get_dns_status() == DnsStatus::Ok {
                     let response = client
                         .clone()
                         .get_server(tonic::Request::new(Empty {}))
@@ -205,8 +205,8 @@ async fn test_dns_error() {
         Err(std::io::Error::new(std::io::ErrorKind::Other, Error {}))
     }));
     tokio::time::sleep(Duration::from_millis(10)).await;
-    match balanced.get_status() {
-        Status::DnsResolutionError { .. } => assert!(true),
+    match balanced.get_dns_status() {
+        DnsStatus::ResolutionError { .. } => (),
         _ => assert!(false, "status is not DnsResolutionError"),
     }
 }

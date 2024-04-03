@@ -14,26 +14,26 @@ use tower::discover::Change;
 pub struct AutoBalancedChannel {
     channel: Channel,
     background_task: JoinHandle<()>,
-    status_reader: Receiver<Status>,
+    dns_status_reader: Receiver<DnsStatus>,
     endpoints_count_reader: Receiver<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Status {
+pub enum DnsStatus {
     Ok,
-    DnsResolutionError { details: String },
+    ResolutionError { details: String },
 }
 
-impl Status {
-    fn dns_resolution_error(e: impl std::fmt::Debug) -> Self {
-        Self::DnsResolutionError {
+impl DnsStatus {
+    fn resolution_error(e: impl std::fmt::Debug) -> Self {
+        Self::ResolutionError {
             details: format!("{e:?}"),
         }
     }
 
-    fn is_dns_resolution_error(&self) -> bool {
+    fn is_error(&self) -> bool {
         match &self {
-            Status::DnsResolutionError { .. } => true,
+            Self::ResolutionError { .. } => true,
             _ => false,
         }
     }
@@ -63,7 +63,7 @@ impl AutoBalancedChannel {
         interval: Duration,
     ) -> AutoBalancedChannel {
         let (channel, sender) = Channel::balance_channel::<IpAddr>(16);
-        let (status_setter, status_reader) = watch::channel::<Status>(Status::Ok);
+        let (dns_status_setter, dns_status_reader) = watch::channel::<DnsStatus>(DnsStatus::Ok);
         let (endpoints_count_setter, endpoints_count_reader) = watch::channel::<usize>(0);
 
         let background_task = tokio::spawn(async move {
@@ -81,7 +81,7 @@ impl AutoBalancedChannel {
 
                 match resolve_domain(endpoint_template.domain()) {
                     Ok(ip_addrs) => {
-                        let _ = status_setter.send(Status::Ok);
+                        let _ = dns_status_setter.send(DnsStatus::Ok);
                         let new_endpoints: HashSet<IpAddr> = ip_addrs.collect();
 
                         for new_ip in new_endpoints.difference(&old_endpoints) {
@@ -101,7 +101,7 @@ impl AutoBalancedChannel {
                         // not necessarily spell doom for the channel. Because
                         // of this, we just report the interim problem and use
                         // last known IP addresses.
-                        let _ = status_setter.send(Status::dns_resolution_error(e));
+                        let _ = dns_status_setter.send(DnsStatus::resolution_error(e));
                     }
                 };
 
@@ -112,7 +112,7 @@ impl AutoBalancedChannel {
         Self {
             channel,
             background_task,
-            status_reader,
+            dns_status_reader,
             endpoints_count_reader,
         }
     }
@@ -121,14 +121,14 @@ impl AutoBalancedChannel {
         self.channel.clone()
     }
 
-    pub fn get_status(&self) -> Status {
-        self.status_reader.borrow().to_owned()
+    pub fn get_dns_status(&self) -> DnsStatus {
+        self.dns_status_reader.borrow().to_owned()
     }
 
     pub fn get_health(&self) -> Health {
         if *self.endpoints_count_reader.borrow() == 0 {
             Health::Broken
-        } else if self.status_reader.borrow().is_dns_resolution_error() {
+        } else if self.dns_status_reader.borrow().is_error() {
             Health::Undetermined
         } else {
             Health::Ok
