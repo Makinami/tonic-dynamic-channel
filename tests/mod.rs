@@ -4,9 +4,9 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use sequential_test::sequential;
-use tonic_dynamic_channel::{AutoBalancedChannel, EndpointTemplate, DnsStatus, Health};
 use tokio::task::JoinSet;
 use tonic::{transport::Server, Request, Response};
+use tonic_dynamic_channel::{AutoBalancedChannel, DnsStatus, EndpointTemplate, Health};
 
 use foo::foo_client::FooClient;
 use foo::foo_server::{Foo, FooServer};
@@ -59,7 +59,11 @@ fn set_dns(addresses: &[&str]) {
     tonic_dynamic_channel::mock_net::set_socket_addrs(Box::new(move |_, _| Ok(sockets.clone())));
 }
 
-fn setup() -> (JoinSet<Result<(), tonic::transport::Error>>, std::sync::Arc<AutoBalancedChannel>, std::sync::Arc<std::sync::RwLock<HashMap<String, i32>>>) {
+fn setup() -> (
+    JoinSet<Result<(), tonic::transport::Error>>,
+    std::sync::Arc<AutoBalancedChannel>,
+    std::sync::Arc<std::sync::RwLock<HashMap<String, i32>>>,
+) {
     let mut set = JoinSet::new();
 
     set.spawn(async { MyServer::run("[::1]").await });
@@ -121,23 +125,26 @@ async fn test_balancing() {
     tokio::time::sleep(Duration::from_millis(10)).await;
     responses.write().expect("can't get a write lock").clear();
     tokio::time::sleep(Duration::from_secs(1)).await;
-    responses.write().and_then(|responses| {
-        assert!(
-            responses
-                .get("127.0.0.1")
-                .expect("no response from 127.0.0.1 server")
-                >= &40,
-            "strangely few responses from 127.0.0.1 server"
-        );
-        assert!(
-            responses
-                .get("[::1]")
-                .expect("no response from [::1] server")
-                >= &40,
-            "strangely few responses from [::1] server"
-        );
-        Ok(())
-    }).expect("can't get a write lock");
+    responses
+        .write()
+        .and_then(|responses| {
+            assert!(
+                responses
+                    .get("127.0.0.1")
+                    .expect("no response from 127.0.0.1 server")
+                    >= &40,
+                "strangely few responses from 127.0.0.1 server"
+            );
+            assert!(
+                responses
+                    .get("[::1]")
+                    .expect("no response from [::1] server")
+                    >= &40,
+                "strangely few responses from [::1] server"
+            );
+            Ok(())
+        })
+        .expect("can't get a write lock");
 }
 
 #[tokio::test]
@@ -150,40 +157,46 @@ async fn test_switching() {
     tokio::time::sleep(Duration::from_millis(10)).await;
     responses.write().expect("can't get a write lock").clear();
     tokio::time::sleep(Duration::from_secs(1)).await;
-    responses.read().and_then(|responses| {
-        assert!(
-            responses
-                .get("127.0.0.1")
-                .expect("no response from 127.0.0.1 server")
-                >= &90,
-            "strangely few responses from 127.0.0.1 server"
-        );
-        assert!(
-            responses.get("[::1]").is_none(),
-            "a response from [::1] was received"
-        );
-        Ok(())
-    }).expect("can't get a read lock");
+    responses
+        .read()
+        .and_then(|responses| {
+            assert!(
+                responses
+                    .get("127.0.0.1")
+                    .expect("no response from 127.0.0.1 server")
+                    >= &90,
+                "strangely few responses from 127.0.0.1 server"
+            );
+            assert!(
+                responses.get("[::1]").is_none(),
+                "a response from [::1] was received"
+            );
+            Ok(())
+        })
+        .expect("can't get a read lock");
 
     println!("only IPv6");
     set_dns(&["::1"]);
     tokio::time::sleep(Duration::from_millis(10)).await;
     responses.write().expect("can't get a write lock").clear();
     tokio::time::sleep(Duration::from_secs(1)).await;
-    responses.read().and_then(|responses| {
-        assert!(
-            responses.get("127.0.0.1").is_none(),
-            "a response from 127.0.0.1 was received"
-        );
-        assert!(
-            responses
-                .get("[::1]")
-                .expect("no response from [::1] server")
-                >= &90,
-            "strangely few responses from [::1] server"
-        );
-        Ok(())
-    }).expect("can't get a write lock");
+    responses
+        .read()
+        .and_then(|responses| {
+            assert!(
+                responses.get("127.0.0.1").is_none(),
+                "a response from 127.0.0.1 was received"
+            );
+            assert!(
+                responses
+                    .get("[::1]")
+                    .expect("no response from [::1] server")
+                    >= &90,
+                "strangely few responses from [::1] server"
+            );
+            Ok(())
+        })
+        .expect("can't get a write lock");
 }
 
 #[tokio::test]

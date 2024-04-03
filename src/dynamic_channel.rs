@@ -89,7 +89,7 @@ impl AutoBalancedChannel {
                         }
 
                         for old_ip in old_endpoints.difference(&new_endpoints) {
-                            let _ =  sender.send(Change::Remove(*old_ip)).await;
+                            let _ = sender.send(Change::Remove(*old_ip)).await;
                         }
 
                         old_endpoints = new_endpoints;

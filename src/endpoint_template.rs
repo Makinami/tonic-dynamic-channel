@@ -52,7 +52,7 @@ impl EndpointTemplate {
             // It's hard to prove that any url::Url will also be parsable as
             // tonic::transport::Uri, but in practice this error should never
             // happen.
-            return Err(Error::Inconvertible)
+            return Err(Error::Inconvertible);
         }
 
         Ok(Self {
@@ -278,8 +278,8 @@ mod tests {
     use http::Uri;
     use url::Url;
 
-    use crate::EndpointTemplate;
     use super::Error;
+    use crate::EndpointTemplate;
 
     #[test]
     fn can_substitute_domain_fot_ipv4_address() {
